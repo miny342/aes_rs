@@ -128,95 +128,101 @@ impl AESkey {
     }
 }
 
+struct Block([u8; 16]);
+
+impl Block {
+    #[inline]
+    fn add_round_key(&self, k: [u8; 16]) -> Self {
+        let mut tmp = [0; 16];
+        for i in 0..16 {
+            tmp[i] = self.0[i] ^ k[i];
+        }
+        Self(tmp)
+    }
+
+    #[inline]
+    fn sub_bytes(&self) -> Self {
+        Self(array::from_fn(|i| S_BOX[self.0[i] as usize]))
+    }
+    #[inline]
+    fn inv_sub_bytes(&self) -> Self {
+        Self(array::from_fn(|i| INV_S_BOX[self.0[i] as usize]))
+    }
+
+    #[inline]
+    fn shift_rows(&self) -> Self {
+        let mut tmp = [0; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                tmp[4 * j + i] = self.0[(4 * j + 5 * i) % 16];
+            }
+        }
+        Self(tmp)
+    }
+    #[inline]
+    fn inv_shift_rows(&self) -> Self {
+        let mut tmp = [0; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                tmp[4 * j + i] = self.0[(4 * j + 13 * i) % 16];
+            }
+        }
+        Self(tmp)
+    }
+
+    #[inline]
+    fn mix_columns(&self) -> Self {
+        const VECTOR: [u8; 4] = [2, 3, 1, 1];
+        let mut tmp = [0; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                for c in 0..4 {
+                    tmp[4 * col + row] ^= mul(VECTOR[(c + 4 - row) % 4], self.0[4 * col + c]);
+                }
+            }
+        }
+        Self(tmp)
+    }
+    #[inline]
+    fn inv_mix_columns(&self) -> Self {
+        const VECTOR: [u8; 4] = [14, 11, 13, 9];
+        let mut tmp = [0; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                for c in 0..4 {
+                    tmp[4 * col + row] ^= mul(VECTOR[(c + 4 - row) % 4], self.0[4 * col + c]);
+                }
+            }
+        }
+        Self(tmp)
+    }
+}
+
 #[derive(Debug)]
 struct AES {
     key: AESkey,
 }
 
 impl AES {
-    #[inline]
-    fn add_round_key(b: [u8; 16], k: [u8; 16]) -> [u8; 16] {
-        let mut tmp = [0; 16];
-        for i in 0..16 {
-            tmp[i] = b[i] ^ k[i];
-        }
-        tmp
-    }
-
-    #[inline]
-    fn sub_bytes(b: [u8; 16]) -> [u8; 16] {
-        array::from_fn(|i| S_BOX[b[i] as usize])
-    }
-    #[inline]
-    fn inv_sub_bytes(b: [u8; 16]) -> [u8; 16] {
-        array::from_fn(|i| INV_S_BOX[b[i] as usize])
-    }
-
-    #[inline]
-    fn shift_rows(b: [u8; 16]) -> [u8; 16] {
-        let mut tmp = [0; 16];
-        for i in 0..4 {
-            for j in 0..4 {
-                tmp[4 * j + i] = b[(4 * j + 5 * i) % 16];
-            }
-        }
-        tmp
-    }
-    #[inline]
-    fn inv_shift_rows(b: [u8; 16]) -> [u8; 16] {
-        let mut tmp = [0; 16];
-        for i in 0..4 {
-            for j in 0..4 {
-                tmp[4 * j + i] = b[(4 * j + 13 * i) % 16];
-            }
-        }
-        tmp
-    }
-
-    #[inline]
-    fn mix_columns(b: [u8; 16]) -> [u8; 16] {
-        const VECTOR: [u8; 4] = [2, 3, 1, 1];
-        let mut tmp = [0; 16];
-        for col in 0..4 {
-            for row in 0..4 {
-                for c in 0..4 {
-                    tmp[4 * col + row] ^= mul(VECTOR[(c + 4 - row) % 4], b[4 * col + c]);
-                }
-            }
-        }
-        tmp
-    }
-    #[inline]
-    fn inv_mix_columns(b: [u8; 16]) -> [u8; 16] {
-        const VECTOR: [u8; 4] = [14, 11, 13, 9];
-        let mut tmp = [0; 16];
-        for col in 0..4 {
-            for row in 0..4 {
-                for c in 0..4 {
-                    tmp[4 * col + row] ^= mul(VECTOR[(c + 4 - row) % 4], b[4 * col + c]);
-                }
-            }
-        }
-        tmp
-    }
-
     fn encrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
         let (round, keys) = self.key.key_expansion();
-        let mut bytes = AES::add_round_key(in_bytes, keys[0]);
+        let mut bytes = Block(in_bytes);
+        bytes = bytes.add_round_key(keys[0]);
 
         for i in 1..round - 1 {
-            bytes = AES::add_round_key(AES::mix_columns(AES::shift_rows(AES::sub_bytes(bytes))), keys[i]);
+            bytes = bytes.sub_bytes().shift_rows().mix_columns().add_round_key(keys[i]);
         }
-        AES::add_round_key(AES::shift_rows(AES::sub_bytes(bytes)), keys[round - 1])
+        bytes.sub_bytes().shift_rows().add_round_key(keys[round - 1]).0
     }
     fn decrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
         let (round, keys) = self.key.key_expansion();
-        let mut bytes = AES::inv_sub_bytes(AES::inv_shift_rows(AES::add_round_key(in_bytes, keys[round - 1])));
+        let mut bytes = Block(in_bytes);
+        bytes = bytes.add_round_key(keys[round - 1]).inv_shift_rows().inv_sub_bytes();
 
         for i in (1..round - 1).rev() {
-            bytes = AES::inv_sub_bytes(AES::inv_shift_rows(AES::inv_mix_columns(AES::add_round_key(bytes, keys[i]))));
+            bytes = bytes.add_round_key(keys[i]).inv_mix_columns().inv_shift_rows().inv_sub_bytes();
         }
-        AES::add_round_key(bytes, keys[0])
+        bytes.add_round_key(keys[0]).0
     }
 }
 
@@ -224,20 +230,21 @@ impl AES {
 mod test {
     use crate::AES;
     use crate::AESkey;
+    use crate::Block;
 
     #[test]
     fn shift_rows() {
-        let v = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-        assert_eq!(AES::shift_rows(v), [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11]);
-        assert_eq!(AES::inv_shift_rows(v), [0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]);
+        let v = Block([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(v.shift_rows().0, [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11]);
+        assert_eq!(v.inv_shift_rows().0, [0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]);
     }
 
     #[test]
     fn mix_columns() {
-        let v = [0xdbu8, 0x13, 0x53, 0x45, 0xf2, 0x0a, 0x22, 0x5c, 0x1, 0x1, 0x1, 0x1, 0x2d, 0x26, 0x31, 0x4c];
-        let ans = [0x8eu8, 0x4d, 0xa1, 0xbc, 0x9f, 0xdc, 0x58, 0x9d, 0x1, 0x1, 0x1, 0x1, 0x4d, 0x7e, 0xbd, 0xf8];
-        assert_eq!(AES::mix_columns(v), ans);
-        assert_eq!(AES::inv_mix_columns(ans), v);
+        let v = Block([0xdbu8, 0x13, 0x53, 0x45, 0xf2, 0x0a, 0x22, 0x5c, 0x1, 0x1, 0x1, 0x1, 0x2d, 0x26, 0x31, 0x4c]);
+        let ans = Block([0x8eu8, 0x4d, 0xa1, 0xbc, 0x9f, 0xdc, 0x58, 0x9d, 0x1, 0x1, 0x1, 0x1, 0x4d, 0x7e, 0xbd, 0xf8]);
+        assert_eq!(v.mix_columns().0, ans.0);
+        assert_eq!(ans.inv_mix_columns().0, v.0);
     }
 
     #[test]
