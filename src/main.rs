@@ -130,7 +130,6 @@ impl AESkey {
 
 #[derive(Debug)]
 struct AES {
-    bytes: [u8; 16],
     key: AESkey,
 }
 
@@ -143,14 +142,16 @@ impl AES {
         }
         tmp
     }
+
     #[inline]
     fn sub_bytes(b: [u8; 16]) -> [u8; 16] {
-        let mut tmp = [0; 16];
-        for i in 0..16 {
-            tmp[i] = S_BOX[b[i] as usize];
-        }
-        tmp
+        array::from_fn(|i| S_BOX[b[i] as usize])
     }
+    #[inline]
+    fn inv_sub_bytes(b: [u8; 16]) -> [u8; 16] {
+        array::from_fn(|i| INV_S_BOX[b[i] as usize])
+    }
+
     #[inline]
     fn shift_rows(b: [u8; 16]) -> [u8; 16] {
         let mut tmp = [0; 16];
@@ -161,6 +162,17 @@ impl AES {
         }
         tmp
     }
+    #[inline]
+    fn inv_shift_rows(b: [u8; 16]) -> [u8; 16] {
+        let mut tmp = [0; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                tmp[4 * j + i] = b[(4 * j + 13 * i) % 16];
+            }
+        }
+        tmp
+    }
+
     #[inline]
     fn mix_columns(b: [u8; 16]) -> [u8; 16] {
         const VECTOR: [u8; 4] = [2, 3, 1, 1];
@@ -174,15 +186,37 @@ impl AES {
         }
         tmp
     }
+    #[inline]
+    fn inv_mix_columns(b: [u8; 16]) -> [u8; 16] {
+        const VECTOR: [u8; 4] = [14, 11, 13, 9];
+        let mut tmp = [0; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                for c in 0..4 {
+                    tmp[4 * col + row] ^= mul(VECTOR[(c + 4 - row) % 4], b[4 * col + c]);
+                }
+            }
+        }
+        tmp
+    }
 
-    fn encrypt(&self) -> [u8; 16] {
+    fn encrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
         let (round, keys) = self.key.key_expansion();
-        let mut bytes = AES::add_round_key(self.bytes, keys[0]);
+        let mut bytes = AES::add_round_key(in_bytes, keys[0]);
 
         for i in 1..round - 1 {
             bytes = AES::add_round_key(AES::mix_columns(AES::shift_rows(AES::sub_bytes(bytes))), keys[i]);
         }
         AES::add_round_key(AES::shift_rows(AES::sub_bytes(bytes)), keys[round - 1])
+    }
+    fn decrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
+        let (round, keys) = self.key.key_expansion();
+        let mut bytes = AES::inv_sub_bytes(AES::inv_shift_rows(AES::add_round_key(in_bytes, keys[round - 1])));
+
+        for i in (1..round - 1).rev() {
+            bytes = AES::inv_sub_bytes(AES::inv_shift_rows(AES::inv_mix_columns(AES::add_round_key(bytes, keys[i]))));
+        }
+        AES::add_round_key(bytes, keys[0])
     }
 }
 
@@ -192,37 +226,61 @@ mod test {
     use crate::AESkey;
 
     #[test]
+    fn shift_rows() {
+        let v = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        assert_eq!(AES::shift_rows(v), [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11]);
+        assert_eq!(AES::inv_shift_rows(v), [0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3]);
+    }
+
+    #[test]
     fn mix_columns() {
         let v = [0xdbu8, 0x13, 0x53, 0x45, 0xf2, 0x0a, 0x22, 0x5c, 0x1, 0x1, 0x1, 0x1, 0x2d, 0x26, 0x31, 0x4c];
-        let res = AES::mix_columns(v);
         let ans = [0x8eu8, 0x4d, 0xa1, 0xbc, 0x9f, 0xdc, 0x58, 0x9d, 0x1, 0x1, 0x1, 0x1, 0x4d, 0x7e, 0xbd, 0xf8];
-        assert_eq!(res, ans);
+        assert_eq!(AES::mix_columns(v), ans);
+        assert_eq!(AES::inv_mix_columns(ans), v);
     }
 
     #[test]
     fn encrypt() {
         let a = AES {
-            bytes: *b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds",
             key: AESkey::K128(*b"!\xf4\x02\xf2[\x1a\x0f\xd7\"\xb81i\xe1\x05\t\xf8")
         };
-        assert_eq!(a.encrypt(), *b"\x9c)\xe4l\xf1\xce\x04\xe8=:k\x16{{\xe1J");
+        assert_eq!(a.encrypt(*b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds"), *b"\x9c)\xe4l\xf1\xce\x04\xe8=:k\x16{{\xe1J");
 
         let b = AES {
-            bytes: *b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds",
             key: AESkey::K192(*b"\x01kG\xc4\xa2XI\nRA\xea\xc9m\xde\x81\xb8\"\xbd \xd5_\xa2A\x0e")
         };
-        assert_eq!(b.encrypt(), *b"\xfa\xe3\xc6v\x8f\x90Xj>Rg,b\x05\xca\xb4");
+        assert_eq!(b.encrypt(*b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds"), *b"\xfa\xe3\xc6v\x8f\x90Xj>Rg,b\x05\xca\xb4");
 
         let c = AES {
-            bytes: *b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds",
             key: AESkey::K256(*b"\xa8\x19@\x8c\xe5\x01\x0c\xa2\xe0\x9e\xf5\x9a\xc3\xd8\x9f_\xf8Y]\x02\xb5$\xe6\x1b\xf8\xaf\xa8\x94\xa9]YO")
         };
-        assert_eq!(c.encrypt(), *b"e\x13\xa2\xa4\xc7R\xca@3\xc0\xde\xf6\xab:\xe8\xcb");
+        assert_eq!(c.encrypt(*b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds"), *b"e\x13\xa2\xa4\xc7R\xca@3\xc0\xde\xf6\xab:\xe8\xcb");
+    }
+
+    #[test]
+    fn decrypt() {
+        let ans = *b"s\xdf\xffW\xfe$\xe8\x07\xbdO\xb1\xbcN\x07\xcds";
+        let a = AES {
+            key: AESkey::K128(*b"!\xf4\x02\xf2[\x1a\x0f\xd7\"\xb81i\xe1\x05\t\xf8")
+        };
+        assert_eq!(a.decrypt(*b"\x9c)\xe4l\xf1\xce\x04\xe8=:k\x16{{\xe1J"), ans);
+
+        let b = AES {
+            key: AESkey::K192(*b"\x01kG\xc4\xa2XI\nRA\xea\xc9m\xde\x81\xb8\"\xbd \xd5_\xa2A\x0e")
+        };
+        assert_eq!(b.decrypt(*b"\xfa\xe3\xc6v\x8f\x90Xj>Rg,b\x05\xca\xb4"), ans);
+
+        let c = AES {
+            key: AESkey::K256(*b"\xa8\x19@\x8c\xe5\x01\x0c\xa2\xe0\x9e\xf5\x9a\xc3\xd8\x9f_\xf8Y]\x02\xb5$\xe6\x1b\xf8\xaf\xa8\x94\xa9]YO")
+        };
+        assert_eq!(c.decrypt(*b"e\x13\xa2\xa4\xc7R\xca@3\xc0\xde\xf6\xab:\xe8\xcb"), ans);
     }
 }
 
 fn main() {
-    let i = AES { bytes: [0x11; 16], key: AESkey::K128([0x22; 16]) };
-    let j = i.encrypt();
-    println!("{:?}", j);
+    let i = AES { key: AESkey::K128([0x22; 16]) };
+    let j = i.encrypt([0x11; 16]);
+    let k = i.decrypt(j);
+    println!("{:?}", k);
 }
