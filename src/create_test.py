@@ -31,3 +31,16 @@ for i in range(1):
     print(data)
     print(key)
     print(ciphertext)
+
+
+key = md5(f"key0".encode()).digest()
+data = md5(f"data0".encode()).digest()
+cipher = AES.new(key, AES.MODE_CBC)
+ciphertext = cipher.encrypt(data)
+print("cbc")
+print(cipher.iv)
+cipher = AES.new(key, AES.MODE_CBC, cipher.iv)
+plain = cipher.decrypt(ciphertext)
+print(data)
+print(key)
+print(ciphertext)
