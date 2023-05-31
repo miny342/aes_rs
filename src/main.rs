@@ -1,4 +1,5 @@
 mod aes;
+mod mode;
 
 use crate::aes::{AES, AESkey};
 
