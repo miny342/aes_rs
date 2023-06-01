@@ -1,4 +1,5 @@
 use std::{ops::BitXor, array};
+use crate::mode::BlockCipher;
 
 // GF(2)[x]/(x^8+x^4+x^3+x+1)上での掛け算
 const fn mul(l: u8, r: u8) -> u8 {
@@ -229,6 +230,16 @@ impl AES {
             bytes = bytes.add_round_key(keys[i]).inv_mix_columns().inv_shift_rows().inv_sub_bytes();
         }
         bytes.add_round_key(keys[0]).0
+    }
+}
+
+impl BlockCipher<16> for AES {
+    fn _encrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
+        self.encrypt(in_bytes)
+    }
+
+    fn _decrypt(&self, in_bytes: [u8; 16]) -> [u8; 16] {
+        self.decrypt(in_bytes)
     }
 }
 
