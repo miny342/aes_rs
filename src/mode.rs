@@ -72,7 +72,16 @@ pub trait BlockCipher<const TEXT_SIZE: usize> {
             out_bytes[(i + 1) * TEXT_SIZE..(i + 2) * TEXT_SIZE].copy_from_slice(&array::from_fn::<u8, TEXT_SIZE, _>(|j| v[TEXT_SIZE + j] ^ e[j]))
         }
     }
-    fn ctr(&self, in_bytes: &[u8], nonce: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {}
+    fn encrypt_ctr(&self, in_bytes: &[u8], nonce: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+        self._prologue(in_bytes, out_bytes);
+        for (i, v) in in_bytes.windows(TEXT_SIZE).step_by(TEXT_SIZE).enumerate() {
+            let e = self._encrypt(array::from_fn(|j| nonce[j] ^ (i >> (8 * j)) as u8));
+            out_bytes[i * TEXT_SIZE..(i + 1) * TEXT_SIZE].copy_from_slice(&array::from_fn::<u8, TEXT_SIZE, _>(|j| v[j] ^ e[j]));
+        }
+    }
+    fn decrypt_ctr(&self, in_bytes: &[u8], nonce: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+        self.encrypt_ctr(in_bytes, nonce, out_bytes);
+    }
 }
 
 struct BlockCipherTester;
@@ -136,6 +145,18 @@ mod test {
         let iv = [11, 12, 13, 14];
         b.encrypt_cfb(&res, iv, &mut out_bytes);
         b.decrypt_cfb(&out_bytes, iv, &mut out_out_bytes);
+        assert!(out_out_bytes == res);
+    }
+
+    #[test]
+    fn test_ctr() {
+        let b = BlockCipherTester;
+        let res: [u8; 16] = array::from_fn(|i| i as u8);
+        let mut out_bytes = [0; 16];
+        let mut out_out_bytes = [0; 16];
+        let iv = [11, 12, 13, 14];
+        b.encrypt_ctr(&res, iv, &mut out_bytes);
+        b.decrypt_ctr(&out_bytes, iv, &mut out_out_bytes);
         assert!(out_out_bytes == res);
     }
 }
