@@ -43,7 +43,17 @@ pub trait BlockCipher<const TEXT_SIZE: usize> {
             out_bytes[(i + 1) * TEXT_SIZE..(i + 2) * TEXT_SIZE].copy_from_slice(&array::from_fn::<u8, TEXT_SIZE, _>(|j| dec[j] ^ v[j]));
         }
     }
-    fn ofb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {}
+    fn encrypt_ofb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+        self._prologue(in_bytes, out_bytes);
+        let mut e = iv;
+        for (i, v) in in_bytes.windows(TEXT_SIZE).step_by(TEXT_SIZE).enumerate() {
+            e = self._encrypt(e);
+            out_bytes[i * TEXT_SIZE..(i + 1) * TEXT_SIZE].copy_from_slice(&array::from_fn::<u8, TEXT_SIZE, _>(|j| e[j] ^ v[j]))
+        }
+    }
+    fn decrypt_ofb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+        self.encrypt_ofb(in_bytes, iv, out_bytes)
+    }
     fn cfb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {}
     fn ctr(&self, in_bytes: &[u8], nonce: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {}
 }
@@ -85,6 +95,18 @@ mod test {
         let iv = [11, 12, 13, 14];
         b.encrypt_cbc(&res, iv, &mut out_bytes);
         b.decrypt_cbc(&out_bytes, iv, &mut out_out_bytes);
+        assert!(out_out_bytes == res);
+    }
+
+    #[test]
+    fn test_ofb() {
+        let b = BlockCipherTester;
+        let res: [u8; 16] = array::from_fn(|i| i as u8);
+        let mut out_bytes = [0; 16];
+        let mut out_out_bytes = [0; 16];
+        let iv = [11, 12, 13, 14];
+        b.encrypt_ofb(&res, iv, &mut out_bytes);
+        b.decrypt_ofb(&out_bytes, iv, &mut out_out_bytes);
         assert!(out_out_bytes == res);
     }
 }
