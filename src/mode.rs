@@ -32,6 +32,7 @@ pub trait BlockCipher<const TEXT_SIZE: usize> {
             out_bytes[TEXT_SIZE * i..TEXT_SIZE * (i + 1)].copy_from_slice(&self._decrypt(v.try_into().unwrap()))
         }
     }
+
     fn encrypt_cbc(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
         self._assert1(in_bytes.len());
         self._assert2(in_bytes.len(), out_bytes.len());
@@ -51,6 +52,7 @@ pub trait BlockCipher<const TEXT_SIZE: usize> {
             out_bytes[(i + 1) * TEXT_SIZE..(i + 2) * TEXT_SIZE].copy_from_slice(&array::from_fn::<u8, TEXT_SIZE, _>(|j| dec[j] ^ v[j]));
         }
     }
+
     fn encrypt_ofb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
         self._assert2(in_bytes.len(), out_bytes.len());
         let mut e = iv;
@@ -64,28 +66,38 @@ pub trait BlockCipher<const TEXT_SIZE: usize> {
     fn decrypt_ofb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
         self.encrypt_ofb(in_bytes, iv, out_bytes)
     }
-    fn encrypt_cfb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+
+    #[doc(hidden)]
+    fn _cfb_n(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8], n: usize, is_encrypt: bool) {
         self._assert2(in_bytes.len(), out_bytes.len());
-        let mut e = iv;
-        for (i, (ib, ob)) in in_bytes.iter().zip(out_bytes.iter_mut()).enumerate() {
-            if i % TEXT_SIZE == 0 {
-                e = self._encrypt(e);
-            }
-            e[i % TEXT_SIZE] ^= *ib;
-            *ob = e[i % TEXT_SIZE];
+        if n % 8 != 0 {
+            panic!("nは8の倍数にしてください");
         }
+        let mut e = iv;
+        let mut e1 = iv;
+        let block = n / 8;
+        for (i, (ib, ob)) in in_bytes.iter().zip(out_bytes.iter_mut()).enumerate() {
+            if i % block == 0 {
+                e1 = self._encrypt(e);
+                e.copy_within(block.., 0);
+            }
+            *ob = e1[i % block] ^ *ib;
+            e[TEXT_SIZE - block + (i % block)] = if is_encrypt { *ob } else { *ib };
+        }
+    }
+    fn encrypt_cfb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
+        self._cfb_n(in_bytes, iv, out_bytes, TEXT_SIZE * 8, true);
     }
     fn decrypt_cfb(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
-        self._assert2(in_bytes.len(), out_bytes.len());
-        let mut e = iv;
-        for (i, (ib, ob)) in in_bytes.iter().zip(out_bytes.iter_mut()).enumerate() {
-            if i % TEXT_SIZE == 0 {
-                e = self._encrypt(e);
-            }
-            *ob = *ib ^ e[i % TEXT_SIZE];
-            e[i % TEXT_SIZE] = *ib;
-        }
+        self._cfb_n(in_bytes, iv, out_bytes, TEXT_SIZE * 8, false);
     }
+    fn encrypt_cfb_n(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8], n: usize) {
+        self._cfb_n(in_bytes, iv, out_bytes, n, true);
+    }
+    fn decrypt_cfb_n(&self, in_bytes: &[u8], iv: [u8; TEXT_SIZE], out_bytes: &mut [u8], n: usize) {
+        self._cfb_n(in_bytes, iv, out_bytes, n, false)
+    }
+
     // fn encrypt_ctr(&self, in_bytes: &[u8], nonce: [u8; TEXT_SIZE], out_bytes: &mut [u8]) {
     //     for (i, v) in in_bytes.windows(TEXT_SIZE).step_by(TEXT_SIZE).enumerate() {
     //         let e = self._encrypt(array::from_fn(|j| nonce[j] ^ (i >> (8 * j)) as u8));
@@ -158,6 +170,18 @@ mod test {
         let iv = [11, 12, 13, 14];
         b.encrypt_cfb(&res, iv, &mut out_bytes);
         b.decrypt_cfb(&out_bytes, iv, &mut out_out_bytes);
+        assert!(out_out_bytes == res);
+    }
+
+    #[test]
+    fn test_cfb_n() {
+        let b = BlockCipherTester;
+        let res: [u8; 13] = array::from_fn(|i| i as u8);
+        let mut out_bytes = [0; 13];
+        let mut out_out_bytes = [0; 13];
+        let iv = [11, 12, 13, 14];
+        b.encrypt_cfb_n(&res, iv, &mut out_bytes, 24);
+        b.decrypt_cfb_n(&out_bytes, iv, &mut out_out_bytes, 24);
         assert!(out_out_bytes == res);
     }
 

@@ -333,5 +333,16 @@ mod test {
             &mut aa
         );
         assert_eq!(ans, aa);
+
+        let ans = *b"\tf\xd4Z#\x1c\xd7m\xc2\xfe\xf1;\xcb\xbf~\x1d\xfd|\xc3\xe3N\xa4\x13}\xf1\xe9\xf3\x03";
+        let a = AES::new(AESkey::K128(*b"!\xf4\x02\xf2[\x1a\x0f\xd7\"\xb81i\xe1\x05\t\xf8"));
+        let mut aa = [0u8; 28];
+        a.encrypt_cfb_n(
+            b"(\xd0\xcd!\x12\x9bc)\xf5\xe8\xaaE\x8e\xef0\xfc\x14u8/\xf9\xd8\xd65\xd0\x10Dw",
+            *b"\xec\xa3\x00h\xa5\xb6\xff\xac\x8b\xf1#X\x7f\x14\xed\xd2",
+            &mut aa,
+            16
+        );
+        assert_eq!(ans, aa);
     }
 }
