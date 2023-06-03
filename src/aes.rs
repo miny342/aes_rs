@@ -344,5 +344,15 @@ mod test {
             16
         );
         assert_eq!(ans, aa);
+
+        let ans = *b"\xe3\x11\xfc*:\x92U\xc8\xc0\xfej\x10k|\xb1x\x052\x96\xdd\x1f\xde\xf2>\xa6\xefd\xdc";
+        let a = AES::new(AESkey::K128(*b"!\xf4\x02\xf2[\x1a\x0f\xd7\"\xb81i\xe1\x05\t\xf8"));
+        let mut aa = [0u8; 28];
+        a.encrypt_ctr(
+            b"(\xd0\xcd!\x12\x9bc)\xf5\xe8\xaaE\x8e\xef0\xfc\x14u8/\xf9\xd8\xd65\xd0\x10Dw",
+            b"01234567",
+            &mut aa
+        );
+        assert_eq!(ans, aa);
     }
 }
