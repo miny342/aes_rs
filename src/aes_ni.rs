@@ -185,6 +185,20 @@ unsafe fn aes_inv_keygen_128(data: &Box<[u8]>) -> Box<[u8]> {
     core::mem::transmute::<_, Vec<u8>>(v).into_boxed_slice()
 }
 
+#[cfg(feature = "use_nightly")]
+pub unsafe fn aesenc(data: *mut u8, key: *const u8) {
+    use std::simd::i64x2;
+
+    let a = data as *mut i64x2;
+    let b = key as *mut i64x2;
+
+    asm!(
+        "aesenc {a}, {b}",
+        a = inout(xmm_reg) *a,
+        b = in(xmm_reg) *b,
+    );
+}
+
 unsafe fn aes_enc_128(data: *mut u8, key: *const u8) {
     asm!(
         "movdqu xmm0, [{d}]",
@@ -224,6 +238,67 @@ unsafe fn aes_dec_128(data: *mut u8, inv_key: *const u8) {
         d = in(reg) data,
         k = in(reg) inv_key,
     )
+}
+
+unsafe fn aes_keygen_192(key: *const u8) -> Box<[u8]> {
+    todo!();
+    let mut v: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); 0xd0];
+    asm!(
+        "movdqu xmm1, [{k}]",
+        "movdqu [{v}], xmm1",
+
+        "aeskeygenassist xmm2, xmm1, 0x1",
+        "call 2f",
+        "movdqu [{v}+0x10], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x2",
+        "call 2f",
+        "movdqu [{v}+0x20], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x4",
+        "call 2f",
+        "movdqu [{v}+0x30], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x8",
+        "call 2f",
+        "movdqu [{v}+0x40], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x10",
+        "call 2f",
+        "movdqu [{v}+0x50], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x20",
+        "call 2f",
+        "movdqu [{v}+0x60], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x40",
+        "call 2f",
+        "movdqu [{v}+0x70], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x80",
+        "call 2f",
+        "movdqu [{v}+0x80], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x1b",
+        "call 2f",
+        "movdqu [{v}+0x90], xmm1",
+        "aeskeygenassist xmm2, xmm1, 0x36",
+        "call 2f",
+        "movdqu [{v}+0xa0], xmm1",
+
+        "jmp 3f",
+
+        "2:",
+        "pshufd xmm2, xmm2, 0xff",
+        "vpslldq xmm3, xmm1, 0x4",
+        "pxor xmm1, xmm3",
+        "vpslldq xmm3, xmm1, 0x4",
+        "pxor xmm1, xmm3",
+        "vpslldq xmm3, xmm1, 0x4",
+        "pxor xmm1, xmm3",
+        "pxor xmm1, xmm2",
+        "ret",
+
+        "3:",
+        k = in(reg) key,
+        v = in(reg) v.as_mut_ptr(),
+        out("xmm1") _,
+        out("xmm2") _,
+        out("xmm3") _,
+    );
+    core::mem::transmute::<_, Vec<u8>>(v).into_boxed_slice()
 }
 
 
